@@ -1,0 +1,806 @@
+// ── CONFIG ────────────────────────────────────────────────────────────────
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz55DVD1zBnQzDaJ-tHF49wMIzpI6pR_R3k47DPz7yu2fOWM-FdQlKl7MWhVYbaHgU_rQ/exec';
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const PEMOJI = {
+  'Netflix': '🔴',
+  'Amazon Prime Video': '🔵',
+  'Apple TV+': '⚫',
+  'HBO Max': '🟣',
+  'Disney+': '🔷',
+  'Peacock': '🦚',
+  'Hulu': '🟢',
+  'Theater': '🎬',
+  'Paramount+': '⭐',
+  'MUBI': '🎞️'
+};
+
+// ── STATE ─────────────────────────────────────────────────────────────────
+let rawData = [];
+let charts = {};
+let curFilters = { platform: 'all', genre: 'all' };
+let allFilters = { year: 'all', platform: 'all', genre: 'all' };
+let datFilters = { year: 'all', platform: 'all', type: 'all', genre: 'all', month: 'all', search: '' };
+let dataPageNum = 1;
+const PER_PAGE = 25;
+let suggLastPick = null;
+
+// ── DATA LOADING ──────────────────────────────────────────────────────────
+async function loadData() {
+  try {
+    const res = await fetch(SCRIPT_URL, { redirect: 'follow', mode: 'cors' });
+    const json = await res.json();
+    rawData = json.map(r => ({
+      name:       r.Name       || r.name       || '',
+      type:       r.Type       || r.type       || '',
+      genre:      r['Details/Genre'] || r.Genre || r.genre || '',
+      platform:   r.Platform   || r.platform   || '',
+      screentime: parseFloat(r.Screentime || r.screentime || 0) || 0,
+      watchDate:  r['Watch Date'] || r.watchDate || '',
+      month:      r.Month      || r.month      || '',
+      year:       parseInt(r.Year || r.year || 0) || 0
+    })).filter(r => r.name && r.year > 0);
+  } catch (e) {
+    console.warn('Data load failed:', e);
+    rawData = [];
+  }
+  setTimeout(() => {
+    document.getElementById('loading').classList.add('hide');
+    navigateTo('readme');
+  }, 200);
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────
+const maxYear  = () => rawData.length ? Math.max(...rawData.map(r => r.year)) : new Date().getFullYear();
+const fmtHrs   = m  => (m / 60).toFixed(1).replace(/\.0$/, '') + ' hrs';
+const fmtK     = n  => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toString();
+const pe       = p  => PEMOJI[p] || '📺';
+
+function uniqueVals(key) {
+  return [...new Set(rawData.map(r => r[key]).filter(Boolean))].sort();
+}
+
+function filterData(d, f) {
+  return d.filter(r =>
+    (!f.year     || f.year     === 'all' || r.year     == f.year) &&
+    (!f.platform || f.platform === 'all' || r.platform === f.platform) &&
+    (!f.genre    || f.genre    === 'all' || r.genre    === f.genre) &&
+    (!f.type     || f.type     === 'all' || r.type     === f.type) &&
+    (!f.month    || f.month    === 'all' || r.month    === f.month) &&
+    (!f.search   || r.name.toLowerCase().includes(f.search.toLowerCase()))
+  );
+}
+
+function countBy(arr, key) {
+  const m = {};
+  arr.forEach(r => { const v = r[key] || 'Unknown'; m[v] = (m[v] || 0) + 1; });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+function countByMonth(arr) {
+  const m = {};
+  MONTHS.forEach(mo => m[mo] = 0);
+  arr.forEach(r => { if (m[r.month] !== undefined) m[r.month]++; });
+  return m;
+}
+
+function destroyCharts() {
+  Object.values(charts).forEach(c => { try { c.destroy(); } catch (e) {} });
+  charts = {};
+}
+
+// ── ROUTER ────────────────────────────────────────────────────────────────
+function navigateTo(page) {
+  destroyCharts();
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
+  document.getElementById('app').innerHTML = '';
+  const pages = { readme: renderReadme, current: renderCurrentYear, alltime: renderAllTime, data: renderData, suggestions: renderSuggestions };
+  (pages[page] || renderReadme)();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── README ────────────────────────────────────────────────────────────────
+function renderReadme() {
+  const cy       = maxYear();
+  const total    = rawData.length;
+  const shows    = rawData.filter(r => r.type.includes('Show') || r.type.includes('Series')).length;
+  const movies   = rawData.filter(r => r.type.toLowerCase() === 'movie').length;
+  const allST    = rawData.reduce((s, r) => s + r.screentime, 0);
+  const cyrData  = rawData.filter(r => r.year === cy);
+  const cyrST    = cyrData.reduce((s, r) => s + r.screentime, 0);
+  const prevData = rawData.filter(r => r.year === cy - 1);
+  const prevST   = prevData.reduce((s, r) => s + r.screentime, 0);
+  const diff     = cyrST - prevST;
+  const diffPct  = prevST ? ((diff / prevST) * 100).toFixed(1) : 0;
+  const topPlat  = countBy(rawData, 'platform')[0];
+  const topGenre = countBy(rawData, 'genre')[0];
+  const bestMo   = Object.entries(countByMonth(rawData)).sort((a, b) => b[1] - a[1])[0];
+  const avgMo    = (total / 12).toFixed(1);
+  const today    = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  // Pre-compute dynamic classes — avoids single quotes inside template literals
+  const diffBadgeClass = diff >= 0 ? 'badge badge-green' : 'badge badge-red';
+  const diffSign       = diff >= 0 ? '+' : '';
+  const yoyBarWidth    = prevST ? Math.min((cyrST / prevST) * 100, 100) : 50;
+
+  // Recent watches — last 6 titles with a valid watch date, sorted newest first
+  const fmtShortDate = s => {
+    try { const d = new Date(s); return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }); }
+    catch { return ''; }
+  };
+  const recent = rawData
+    .filter(r => r.watchDate)
+    .sort((a, b) => new Date(b.watchDate) - new Date(a.watchDate))
+    .slice(0, 6);
+  const RW_ICONS = ['🎬','📽️','🎭','🍿','📺','🎞️','🎥','🎦','🌟','✨','🎪','🎨'];
+  const recentHTML = recent.map((r, i) => {
+    const typeClass = r.type.toLowerCase() === 'movie' ? 'rw-pill movie' : 'rw-pill show';
+    const typeLabel = r.type.toLowerCase() === 'movie' ? 'Movie' : 'Show';
+    const icon      = RW_ICONS[i % RW_ICONS.length];
+    const genre     = r.genre ? '<span class="rw-genre">' + r.genre + '</span>' : '';
+    return '<div class="rw-card">' +
+      '<div class="rw-emoji">' + icon + '</div>' +
+      '<div class="rw-info">' +
+        '<div class="rw-name">' + r.name + '</div>' +
+        '<div class="rw-meta">' +
+          '<span class="' + typeClass + '">' + typeLabel + '</span>' +
+          genre +
+          '<span class="rw-date">' + fmtShortDate(r.watchDate) + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="readme-hero">
+      <div class="readme-top">
+        <div>
+          <h1><em>personal media tracker</em>Content Tracking Dashboard</h1>
+          <p class="readme-desc">Track and analyse my media consumption across streaming platforms. See genre trends, platform habits, and how my viewing changes over time.</p>
+        </div>
+        <div class="readme-updated"><strong>${today}</strong>Last updated</div>
+      </div>
+      <div class="readme-stats">
+        <div class="readme-stat">
+          <div class="rs-label">Total Titles</div>
+          <div class="rs-val">${total}</div>
+          <div class="rs-sub">${shows} shows · ${movies} movies</div>
+        </div>
+        <div class="readme-stat">
+          <div class="rs-label">All Time Screentime</div>
+          <div class="rs-val">${fmtK(Math.round(allST / 60))}<small> hrs</small></div>
+          <div class="rs-sub">${fmtK(Math.round(allST))} mins logged</div>
+        </div>
+        <div class="readme-stat">
+          <div class="rs-label">This Year (${cy})</div>
+          <div class="rs-val">${Math.round(cyrST / 60)}<small> hrs</small></div>
+          <div class="rs-sub"><span class="rs-accent">${cyrData.length} titles</span> watched in ${cy}</div>
+        </div>
+        <div class="readme-stat">
+          <div class="rs-label">Top Platform</div>
+          <div class="rs-val" style="font-size:20px;letter-spacing:-.3px">${topPlat ? pe(topPlat[0]) : ''}${topPlat ? topPlat[0] : '—'}</div>
+          <div class="rs-sub">${topPlat ? topPlat[1] + ' titles all time' : ''}</div>
+        </div>
+      </div>
+    </div>
+    <div class="readme-main">
+      <div>
+        <div class="cards-label">What's inside</div>
+        <div class="cards-grid">
+          <div class="info-card" onclick="navigateTo('current')"><div class="ic-icon">📅</div><div class="ic-body"><h3>Current Year Numbers</h3><p>This year's stats — shows vs movies, platform breakdown, genre split and monthly viewing trend.</p></div></div>
+          <div class="info-card" onclick="navigateTo('alltime')"><div class="ic-icon">📈</div><div class="ic-body"><h3>All Time Numbers</h3><p>Complete viewing history across all years. Filter by year, platform or genre to spot long-term patterns.</p></div></div>
+          <div class="info-card" onclick="navigateTo('data')"><div class="ic-icon">🗂️</div><div class="ic-body"><h3>Data</h3><p>Full list of every title logged. Search by name, filter by type, genre, platform or month.</p></div></div>
+          <div class="info-card" onclick="navigateTo('suggestions')"><div class="ic-icon gold">🎲</div><div class="ic-body"><h3>Suggestion Generator</h3><p>Can't decide what to watch? Spin for a random pick filtered by genre or type.</p></div></div>
+        </div>
+        <div class="rw-section">
+          <div class="cards-label">Recently Watched</div>
+          <div class="rw-strip">${recentHTML}</div>
+        </div>
+      </div>
+      <div class="readme-sidebar">
+        <div class="fact-card">
+          <div class="fact-title">Quick Facts</div>
+          <div class="fact-row"><div class="fact-l"><span>🎭</span> Top Genre</div><div class="fact-r">${topGenre ? topGenre[0] : '—'}</div></div>
+          <div class="fact-row"><div class="fact-l"><span>📆</span> Best Month</div><div class="fact-r">${bestMo ? bestMo[0] : '—'}</div></div>
+          <div class="fact-row"><div class="fact-l"><span>📊</span> Avg / Month</div><div class="fact-r">${avgMo} titles</div></div>
+          <div class="fact-row"><div class="fact-l"><span>📺</span> Shows</div><div class="fact-r">${total ? (shows / total * 100).toFixed(1) : 0}%</div></div>
+          <div class="fact-row"><div class="fact-l"><span>🎬</span> Movies</div><div class="fact-r">${total ? (movies / total * 100).toFixed(1) : 0}%</div></div>
+        </div>
+        <div class="yoy-card">
+          <div class="yoy-title">Year on Year</div>
+          <div class="yoy-row">
+            <div><div class="yoy-label">This year so far</div><div class="yoy-val">${fmtHrs(cyrST)}</div></div>
+            <span class="${diffBadgeClass}">${diffSign}${diffPct}%</span>
+          </div>
+          <div class="yoy-bar-track"><div class="yoy-bar-fill" style="width:${yoyBarWidth}%"></div></div>
+          <div class="yoy-note">vs ${fmtHrs(prevST)} full year ${cy - 1}</div>
+        </div>
+        <div class="note-card">
+          <div class="note-icon">💡</div>
+          <div class="note-body"><strong>About Difference</strong>All difference figures compare screentime to the same metric from the previous year.</div>
+        </div>
+      </div>
+    </div>
+    <div class="footer">Data loaded live from Google Sheets · ${total} titles</div>`;
+}
+
+// ── PLATFORM BARS HELPER ──────────────────────────────────────────────────
+function buildPlatBars(platCounts) {
+  const maxVal = platCounts[0] ? platCounts[0][1] : 1;
+  return platCounts.map((p, i) => {
+    // Pre-compute class — no ternary with quotes inside template literal
+    const fillClass = i === 0 ? 'plat-fill top' : 'plat-fill';
+    const pct = (p[1] / maxVal * 100).toFixed(0);
+    return `<div class="plat-row">
+      <div class="plat-name">${pe(p[0])} ${p[0]}</div>
+      <div class="plat-track"><div class="${fillClass}" style="width:${pct}%"></div></div>
+      <div class="plat-count">${p[1]}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── TREEMAP HELPER ────────────────────────────────────────────────────────
+function buildTreemap(genCounts, totalGen) {
+  const cols = ['col1', 'col2a', 'col2b', 'col3a', 'col3b'];
+  const pads = genCounts.slice(0, 5);
+  while (pads.length < 5) pads.push(['—', 0]);
+  return pads.map((g, i) => {
+    const blockClass = `tm-block ${cols[i]}`;
+    const pct = totalGen && g[1] ? (g[1] / totalGen * 100).toFixed(1) + '%' : '';
+    return `<div class="${blockClass}">
+      <div class="tm-name">${g[0]}</div>
+      <div class="tm-pct">${pct}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── CURRENT YEAR ──────────────────────────────────────────────────────────
+function renderCurrentYear() {
+  const cy        = maxYear();
+  const platforms = ['all', ...uniqueVals('platform')];
+  const genres    = ['all', ...uniqueVals('genre')];
+
+  const platOptions  = platforms.map(p => `<option value="${p}">${p === 'all' ? 'All' : p}</option>`).join('');
+  const genreOptions = genres.map(g => `<option value="${g}">${g === 'all' ? 'All' : g}</option>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page-header">
+      <div class="ph-left"><h1>Current Year Numbers</h1><p>${cy} · All months so far</p></div>
+      <div class="ph-right">
+        <div class="ph-filter">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.5);margin-right:4px">Platform</span>
+          <select id="cf-plat" onchange="curFilters.platform=this.value;updateCurrentYear()">${platOptions}</select>
+        </div>
+        <div class="ph-filter">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.5);margin-right:4px">Genre</span>
+          <select id="cf-genre" onchange="curFilters.genre=this.value;updateCurrentYear()">${genreOptions}</select>
+        </div>
+      </div>
+    </div>
+    <div class="main" id="cy-main"></div>
+    <div class="footer" id="cy-footer"></div>`;
+
+  updateCurrentYear();
+}
+
+function updateCurrentYear() {
+  const cy   = maxYear();
+  const base = rawData.filter(r => r.year === cy);
+  const d    = filterData(base, curFilters);
+  const prev = rawData.filter(r => r.year === cy - 1);
+
+  const shows  = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).length;
+  const movies = d.filter(r => r.type.toLowerCase() === 'movie').length;
+  const st     = d.reduce((s, r) => s + r.screentime, 0);
+  const prevST = prev.reduce((s, r) => s + r.screentime, 0);
+  const diff   = st - prevST;
+  const diffPct = prevST ? ((diff / prevST) * 100).toFixed(1) : 'N/A';
+
+  const platCounts = countBy(d, 'platform').slice(0, 8);
+  const genCounts  = countBy(d, 'genre').slice(0, 5);
+  const totalGen   = genCounts.reduce((s, g) => s + g[1], 0);
+  const topGenre   = genCounts[0] || ['—', 0];
+  const bestMo     = Object.entries(countByMonth(d)).sort((a, b) => b[1] - a[1])[0] || ['—', 0];
+
+  // ── Pre-compute ALL dynamic classes before template literals ──────────
+  const showsPct  = d.length ? (shows / d.length * 100).toFixed(0) : 0;
+  const moviesPct = d.length ? (movies / d.length * 100).toFixed(0) : 0;
+  const diffCardClass = diff < 0 ? 'kpi-card accent-red a4' : 'kpi-card accent-gold a4';
+  const diffValClass  = diff < 0 ? 'kpi-val negative' : 'kpi-val';
+  const diffBadgeClass = diff < 0 ? 'badge badge-red' : 'badge badge-green';
+  const diffSign      = diff >= 0 ? '+' : '';
+  const diffHrs       = Math.round(diff / 60);
+  const genrePct      = totalGen ? (topGenre[1] / totalGen * 100).toFixed(1) : 0;
+  const topPlatEmoji  = platCounts[0] ? pe(platCounts[0][0]) : '';
+  const topPlatName   = platCounts[0] ? platCounts[0][0] : '—';
+  const topPlatCount  = platCounts[0] ? platCounts[0][1] + ' titles' : '';
+
+  destroyCharts();
+
+  document.getElementById('cy-main').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card a1">
+        <div class="kpi-label">Shows This Year</div>
+        <div class="kpi-val">${shows}</div>
+        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total</div>
+      </div>
+      <div class="kpi-card a2">
+        <div class="kpi-label">Movies This Year</div>
+        <div class="kpi-val">${movies}</div>
+        <div class="kpi-sub"><span class="badge badge-gold">${moviesPct}%</span> of total</div>
+      </div>
+      <div class="kpi-card a3">
+        <div class="kpi-label">Screentime This Year</div>
+        <div class="kpi-val">${fmtHrs(st)}</div>
+        <div class="kpi-sub">Across ${d.length} titles</div>
+      </div>
+      <div class="${diffCardClass}">
+        <div class="kpi-label">Difference YoY</div>
+        <div class="${diffValClass}">${diffSign}${diffHrs} <small>hrs</small></div>
+        <div class="kpi-sub"><span class="${diffBadgeClass}">${diffSign}${diffPct}%</span> vs last year</div>
+      </div>
+    </div>
+    <div class="charts-row">
+      <div class="chart-card a5">
+        <div class="chart-title">By Platform</div>
+        <div class="plat-bars">${buildPlatBars(platCounts)}</div>
+      </div>
+      <div class="chart-card a6">
+        <div class="chart-title">Titles by Month</div>
+        <div class="chart-canvas-wrap"><canvas id="cy-monthly"></canvas></div>
+      </div>
+    </div>
+    <div class="bottom-row">
+      <div class="chart-card" style="animation:fadeUp .5s ease .3s both">
+        <div class="chart-title">By Genre</div>
+        <div class="treemap">${buildTreemap(genCounts, totalGen)}</div>
+      </div>
+      <div class="stat-sidebar">
+        <div class="stat-card a1">
+          <div class="stat-info"><div class="stat-label">Top Platform</div><div class="stat-val" style="font-size:17px">${topPlatEmoji} ${topPlatName}</div></div>
+          <span class="stat-badge2">${topPlatCount}</span>
+        </div>
+        <div class="stat-card a2">
+          <div class="stat-info"><div class="stat-label">Top Genre</div><div class="stat-val">${topGenre[0]}</div></div>
+          <span class="stat-badge2">${genrePct}%</span>
+        </div>
+        <div class="stat-card a3">
+          <div class="stat-info"><div class="stat-label">Best Month</div><div class="stat-val">${bestMo[0]}</div></div>
+          <span class="stat-badge2">${bestMo[1]} titles</span>
+        </div>
+        <div class="stat-card a4">
+          <div class="stat-info"><div class="stat-label">Total Watched</div><div class="stat-val">${d.length}</div></div>
+          <div class="stat-info"><div class="stat-label" style="margin-top:2px">titles in ${cy}</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('cy-footer').textContent = `Last updated live from Google Sheets · ${cy} data`;
+
+  const moData   = countByMonth(d);
+  const moLabels = MONTHS.filter(m => moData[m] > 0);
+  const moVals   = moLabels.map(m => moData[m]);
+  initLineChart('cy-monthly', moLabels, moVals);
+}
+
+// ── ALL TIME ──────────────────────────────────────────────────────────────
+function renderAllTime() {
+  const years     = ['all', ...[...new Set(rawData.map(r => r.year))].sort((a, b) => b - a).map(y => y.toString())];
+  const platforms = ['all', ...uniqueVals('platform')];
+  const genres    = ['all', ...uniqueVals('genre')];
+
+  const yearOptions  = years.map(y => `<option value="${y}">${y === 'all' ? 'All Years' : y}</option>`).join('');
+  const platOptions  = platforms.map(p => `<option value="${p}">${p === 'all' ? 'All' : p}</option>`).join('');
+  const genreOptions = genres.map(g => `<option value="${g}">${g === 'all' ? 'All' : g}</option>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page-header">
+      <div class="ph-left"><h1>All Time Numbers</h1><p>Complete viewing history · all years</p></div>
+      <div class="ph-right">
+        <div class="ph-filter">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.5);margin-right:4px">Year</span>
+          <select id="af-year" onchange="allFilters.year=this.value;updateAllTime()">${yearOptions}</select>
+        </div>
+        <div class="ph-filter">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.5);margin-right:4px">Platform</span>
+          <select id="af-plat" onchange="allFilters.platform=this.value;updateAllTime()">${platOptions}</select>
+        </div>
+        <div class="ph-filter">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.5);margin-right:4px">Genre</span>
+          <select id="af-genre" onchange="allFilters.genre=this.value;updateAllTime()">${genreOptions}</select>
+        </div>
+      </div>
+    </div>
+    <div class="main" id="at-main"></div>
+    <div class="footer" id="at-footer"></div>`;
+
+  updateAllTime();
+}
+
+function updateAllTime() {
+  const d      = filterData(rawData, allFilters);
+  const shows  = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).length;
+  const movies = d.filter(r => r.type.toLowerCase() === 'movie').length;
+  const st     = d.reduce((s, r) => s + r.screentime, 0);
+
+  const platCounts = countBy(d, 'platform').slice(0, 8);
+  const genCounts  = countBy(d, 'genre').slice(0, 5);
+  const totalGen   = genCounts.reduce((s, g) => s + g[1], 0);
+  const topPlat    = platCounts[0] || ['—', 0];
+  const topGenre   = genCounts[0]  || ['—', 0];
+  const bestMo     = Object.entries(countByMonth(d)).sort((a, b) => b[1] - a[1])[0] || ['—', 0];
+  const yearsSet   = [...new Set(d.map(r => r.year))].filter(Boolean);
+  const avgMo      = yearsSet.length ? (d.length / (yearsSet.length * 12)).toFixed(1) : '—';
+
+  // ── Pre-compute ALL dynamic values before template literals ───────────
+  const showsPct  = d.length ? (shows / d.length * 100).toFixed(1) : 0;
+  const moviesPct = d.length ? (movies / d.length * 100).toFixed(1) : 0;
+  const genrePct  = totalGen ? (topGenre[1] / totalGen * 100).toFixed(1) : 0;
+  const yearLabel = yearsSet.length + ' year' + (yearsSet.length !== 1 ? 's' : '') + ' of data';
+
+  destroyCharts();
+
+  document.getElementById('at-main').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card a1">
+        <div class="kpi-label">Total Titles</div>
+        <div class="kpi-val">${d.length}</div>
+        <div class="kpi-sub">${shows} shows + ${movies} movies</div>
+      </div>
+      <div class="kpi-card accent-gold a2">
+        <div class="kpi-label">Screentime All Time</div>
+        <div class="kpi-val">${fmtK(Math.round(st / 60))}<small> hrs</small></div>
+        <div class="kpi-sub">${fmtK(Math.round(st))} minutes</div>
+      </div>
+      <div class="kpi-card a3">
+        <div class="kpi-label">Shows (All Time)</div>
+        <div class="kpi-val">${shows}</div>
+        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total</div>
+      </div>
+      <div class="kpi-card a4">
+        <div class="kpi-label">Movies (All Time)</div>
+        <div class="kpi-val">${movies}</div>
+        <div class="kpi-sub"><span class="badge badge-gold">${moviesPct}%</span> of total</div>
+      </div>
+    </div>
+    <div class="charts-row">
+      <div class="chart-card a5">
+        <div class="chart-title">By Platform</div>
+        <div class="plat-bars">${buildPlatBars(platCounts)}</div>
+      </div>
+      <div class="chart-card a6">
+        <div class="chart-title">Total Count by Month (All Years)</div>
+        <div class="chart-canvas-wrap"><canvas id="at-monthly"></canvas></div>
+      </div>
+    </div>
+    <div class="bottom-row">
+      <div class="chart-card" style="animation:fadeUp .5s ease .3s both">
+        <div class="chart-title">By Genre</div>
+        <div class="treemap">${buildTreemap(genCounts, totalGen)}</div>
+      </div>
+      <div class="stat-sidebar">
+        <div class="stat-card a1">
+          <div class="stat-info"><div class="stat-label">Top Platform</div><div class="stat-val" style="font-size:17px">${pe(topPlat[0])} ${topPlat[0]}</div></div>
+          <span class="stat-badge2">${topPlat[1]} titles</span>
+        </div>
+        <div class="stat-card a2">
+          <div class="stat-info"><div class="stat-label">Top Genre</div><div class="stat-val">${topGenre[0]}</div></div>
+          <span class="stat-badge2">${genrePct}%</span>
+        </div>
+        <div class="stat-card a3">
+          <div class="stat-info"><div class="stat-label">Best Month</div><div class="stat-val">${bestMo[0]}</div></div>
+          <span class="stat-badge2">${bestMo[1]} titles</span>
+        </div>
+        <div class="stat-card a4">
+          <div class="stat-info"><div class="stat-label">Avg Per Month</div><div class="stat-val">${avgMo}</div></div>
+          <div class="stat-info"><div class="stat-label" style="margin-top:2px">titles / month</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('at-footer').textContent = `${d.length} titles · ${yearLabel}`;
+
+  const moData = countByMonth(d);
+  initLineChart('at-monthly', MONTHS, MONTHS.map(m => moData[m]));
+}
+
+// ── DATA TAB ──────────────────────────────────────────────────────────────
+function renderData() {
+  const years     = ['all', ...[...new Set(rawData.map(r => r.year))].sort((a, b) => b - a).map(y => y.toString())];
+  const platforms = ['all', ...uniqueVals('platform')];
+  const genres    = ['all', ...uniqueVals('genre')];
+  const types     = ['all', ...uniqueVals('type')];
+  const months    = ['all', ...MONTHS.filter(m => rawData.some(r => r.month === m))];
+
+  const yearOpts  = years.map(y    => `<option value="${y}">${y === 'all' ? 'All Years' : y}</option>`).join('');
+  const platOpts  = platforms.map(p => `<option value="${p}">${p === 'all' ? 'All Platforms' : p}</option>`).join('');
+  const typeOpts  = types.map(t    => `<option value="${t}">${t === 'all' ? 'All Types' : t}</option>`).join('');
+  const genreOpts = genres.map(g   => `<option value="${g}">${g === 'all' ? 'All Genres' : g}</option>`).join('');
+  const monthOpts = months.map(m   => `<option value="${m}">${m === 'all' ? 'All Months' : m}</option>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page-header">
+      <div class="ph-left"><h1>All Shows &amp; Movies</h1><p>Your complete watchlist · sorted by watch date</p></div>
+      <div class="ph-right">
+        <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:6px 14px;font-size:12px;color:rgba(255,255,255,.7)">📺 <strong id="dh-shows" style="color:#fff">—</strong> shows</div>
+        <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:6px 14px;font-size:12px;color:rgba(255,255,255,.7)">🎬 <strong id="dh-movies" style="color:#fff">—</strong> movies</div>
+        <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:6px 14px;font-size:12px;color:rgba(255,255,255,.7)">Total <strong id="dh-total" style="color:#fff">—</strong></div>
+      </div>
+    </div>
+    <div class="data-filters">
+      <div class="df-select"><select id="df-year"  onchange="datFilters.year=this.value;dataPageNum=1;updateDataTable()">${yearOpts}</select></div>
+      <div class="df-select"><select id="df-plat"  onchange="datFilters.platform=this.value;dataPageNum=1;updateDataTable()">${platOpts}</select></div>
+      <div class="df-select"><select id="df-type"  onchange="datFilters.type=this.value;dataPageNum=1;updateDataTable()">${typeOpts}</select></div>
+      <div class="df-select"><select id="df-genre" onchange="datFilters.genre=this.value;dataPageNum=1;updateDataTable()">${genreOpts}</select></div>
+      <div class="df-select"><select id="df-month" onchange="datFilters.month=this.value;dataPageNum=1;updateDataTable()">${monthOpts}</select></div>
+      <div class="df-divider"></div>
+      <div class="df-search">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="#7a9e8a" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="#7a9e8a" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input id="df-search" type="text" placeholder="Search by name…" oninput="datFilters.search=this.value;dataPageNum=1;updateDataTable()">
+      </div>
+    </div>
+    <div class="data-main">
+      <div class="data-header-row"><div class="data-count" id="dat-count"></div></div>
+      <div id="dat-table"></div>
+      <div class="pagination" id="dat-pag"></div>
+    </div>
+    <div class="footer" id="dat-footer"></div>`;
+
+  updateDataTable();
+}
+
+function updateDataTable() {
+  const d = filterData(rawData, datFilters).sort((a, b) => {
+    if (!a.watchDate && !b.watchDate) return 0;
+    if (!a.watchDate) return 1;
+    if (!b.watchDate) return -1;
+    return new Date(b.watchDate) - new Date(a.watchDate);
+  });
+
+  const shows  = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).length;
+  const movies = d.filter(r => r.type.toLowerCase() === 'movie').length;
+
+  const el = id => document.getElementById(id);
+  if (el('dh-shows'))  el('dh-shows').textContent  = shows;
+  if (el('dh-movies')) el('dh-movies').textContent = movies;
+  if (el('dh-total'))  el('dh-total').textContent  = d.length;
+
+  const totalPages = Math.max(1, Math.ceil(d.length / PER_PAGE));
+  if (dataPageNum > totalPages) dataPageNum = 1;
+  const start = (dataPageNum - 1) * PER_PAGE;
+  const end   = start + PER_PAGE;
+  const page  = d.slice(start, end);
+
+  el('dat-count').innerHTML = `<strong>${d.length}</strong> title${d.length !== 1 ? 's' : ''} found`;
+
+  if (!d.length) {
+    el('dat-table').innerHTML = '<div class="empty-state"><span>🔍</span>No titles match your filters</div>';
+    el('dat-pag').innerHTML = '';
+    return;
+  }
+
+  const fmtDate = s => {
+    try { const dt = new Date(s); return isNaN(dt) ? s : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return s; }
+  };
+
+  // Build rows using string concat to avoid nested quotes in template literal class attributes
+  const rows = page.map((r, i) => {
+    const pillClass = r.type.toLowerCase() === 'movie' ? 'type-pill movie' : 'type-pill show';
+    return `<tr>
+      <td class="row-num">${start + i + 1}</td>
+      <td style="font-weight:500">${r.name}</td>
+      <td><span class="${pillClass}">${r.type}</span></td>
+      <td>${r.genre || '—'}</td>
+      <td>${pe(r.platform)} ${r.platform}</td>
+      <td style="color:var(--text-soft)">${fmtDate(r.watchDate)}</td>
+    </tr>`;
+  }).join('');
+
+  el('dat-table').innerHTML = `<table>
+    <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Watch Date</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  const prevDisabled = dataPageNum <= 1 ? 'disabled' : '';
+  const nextDisabled = dataPageNum >= totalPages ? 'disabled' : '';
+
+  el('dat-pag').innerHTML = `
+    <div class="pag-info">Showing ${start + 1}–${Math.min(end, d.length)} of ${d.length}</div>
+    <div class="pag-btns">
+      <button class="pag-btn" onclick="dataPageNum--;updateDataTable()" ${prevDisabled}>← Prev</button>
+      <button class="pag-btn" onclick="dataPageNum++;updateDataTable()" ${nextDisabled}>Next →</button>
+    </div>`;
+}
+
+// ── SUGGESTIONS ───────────────────────────────────────────────────────────
+function renderSuggestions() {
+  const genres = [...new Set(rawData.map(r => r.genre).filter(Boolean))].sort();
+  const types  = [...new Set(rawData.map(r => r.type).filter(Boolean))].sort();
+
+  const genreOptions = genres.map(g => `<option value="${g}">${g}</option>`).join('');
+  const typeOptions  = types.map(t  => `<option value="${t}">${t}</option>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page-header"><div class="ph-left"><h1>Suggestion Generator</h1><p>Spin for a random pick from your watchlist</p></div></div>
+    <div class="sugg-page">
+      <div class="sugg-inner">
+        <div class="sugg-filters">
+          <div>
+            <div class="sf-label">Genre</div>
+            <select id="sg-genre" class="sf-select" onchange="updateSuggCount()">
+              <option value="all">All Genres</option>${genreOptions}
+            </select>
+          </div>
+          <div>
+            <div class="sf-label">Type</div>
+            <select id="sg-type" class="sf-select" onchange="updateSuggCount()">
+              <option value="all">All Types</option>${typeOptions}
+            </select>
+          </div>
+        </div>
+        <div class="result-card" id="sugg-card">
+          <div class="result-tag">Your Pick</div>
+          <div class="result-name empty" id="sugg-name"><span>🎬</span>Hit spin to get a suggestion</div>
+          <div class="result-meta" id="sugg-meta"></div>
+        </div>
+        <button class="spin-btn" id="sugg-spin" onclick="suggSpin(event)">
+          <span class="sbi">🎲</span> Spin for a Suggestion
+        </button>
+        <button class="try-btn" id="sugg-try" onclick="suggTryAgain()" disabled>
+          <span class="arr">↻</span> Not feeling it — try another
+        </button>
+        <div class="sugg-count" id="sugg-count"></div>
+      </div>
+    </div>`;
+
+  updateSuggCount();
+}
+
+function getSuggFiltered() {
+  const g = document.getElementById('sg-genre')?.value || 'all';
+  const t = document.getElementById('sg-type')?.value  || 'all';
+  return rawData.filter(r => (g === 'all' || r.genre === g) && (t === 'all' || r.type === t));
+}
+
+function updateSuggCount() {
+  const pool = getSuggFiltered();
+  const el = document.getElementById('sugg-count');
+  if (el) el.innerHTML = `<strong>${pool.length}</strong> title${pool.length !== 1 ? 's' : ''} available`;
+}
+
+function suggSpin(e) {
+  const btn  = document.getElementById('sugg-spin');
+  const pool = getSuggFiltered();
+  if (!pool.length) { showSuggResult(null); return; }
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  addRipple(btn, e);
+  let f = 0;
+  const iv = setInterval(() => {
+    const t  = pool[Math.floor(Math.random() * pool.length)];
+    const ne = document.getElementById('sugg-name');
+    if (ne) { ne.textContent = t.name; ne.className = 'result-name'; }
+    const me = document.getElementById('sugg-meta');
+    if (me) me.innerHTML = '';
+    if (++f >= 7) {
+      clearInterval(iv);
+      const excl  = suggLastPick?.name;
+      const avail = pool.filter(r => r.name !== excl);
+      const pick  = (avail.length ? avail : pool)[Math.floor(Math.random() * (avail.length || pool.length))];
+      suggLastPick = pick;
+      showSuggResult(pick);
+      btn.disabled = false;
+      btn.classList.remove('spinning');
+      const tryBtn = document.getElementById('sugg-try');
+      if (tryBtn) tryBtn.disabled = false;
+    }
+  }, 80);
+}
+
+function suggTryAgain() {
+  const pool  = getSuggFiltered();
+  const excl  = suggLastPick?.name;
+  const avail = pool.filter(r => r.name !== excl);
+  const pick  = (avail.length ? avail : pool)[Math.floor(Math.random() * (avail.length || pool.length))];
+  suggLastPick = pick;
+  showSuggResult(pick, true);
+}
+
+function showSuggResult(item, animate = true) {
+  const ne = document.getElementById('sugg-name');
+  const me = document.getElementById('sugg-meta');
+  if (!ne || !me) return;
+  if (!item) {
+    ne.className = 'result-name empty';
+    ne.innerHTML = '<span>😕</span>No matches — try different filters';
+    me.innerHTML = '';
+    return;
+  }
+  ne.className = animate ? 'result-name spinning' : 'result-name';
+  if (animate) ne.addEventListener('animationend', () => ne.classList.remove('spinning'), { once: true });
+  ne.textContent = item.name;
+  const typeEmoji = item.type === 'Movie' ? '🎬' : '📺';
+  me.innerHTML = `
+    <span class="rm-badge plat">${pe(item.platform)} ${item.platform}</span>
+    <span class="rm-badge type">${typeEmoji} ${item.type}</span>
+    <span class="rm-badge genre">🏷️ ${item.genre}</span>`;
+  burstConfetti();
+}
+
+function burstConfetti() {
+  const card = document.getElementById('sugg-card');
+  if (!card) return;
+  const cols = ['#40916c', '#f4a261', '#74c69d', '#ffd166', '#2d6a4f'];
+  for (let i = 0; i < 12; i++) {
+    const dot  = document.createElement('div');
+    dot.className = 'confetti-dot';
+    const a    = (i / 12) * 360;
+    const dist = 40 + Math.random() * 50;
+    dot.style.cssText = `left:50%;top:50%;background:${cols[i % cols.length]};--dx:${Math.cos(a * Math.PI / 180) * dist}px;--dy:${Math.sin(a * Math.PI / 180) * dist}px;animation-delay:${i * .02}s;`;
+    card.appendChild(dot);
+    dot.addEventListener('animationend', () => dot.remove());
+  }
+}
+
+function addRipple(btn, e) {
+  const r2 = btn.getBoundingClientRect();
+  const rp = document.createElement('div');
+  rp.className = 'ripple';
+  rp.style.left = (e.clientX - r2.left - 30) + 'px';
+  rp.style.top  = (e.clientY - r2.top  - 30) + 'px';
+  btn.appendChild(rp);
+  rp.addEventListener('animationend', () => rp.remove());
+}
+
+// ── LINE CHART ────────────────────────────────────────────────────────────
+function initLineChart(canvasId, labels, data) {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  if (charts[canvasId]) { try { charts[canvasId].destroy(); } catch (e) {} }
+  charts[canvasId] = new Chart(el, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        fill: true,
+        tension: .4,
+        borderColor: '#2d6a4f',
+        borderWidth: 2.5,
+        pointRadius: 5,
+        pointBackgroundColor: '#fff',
+        pointBorderColor: '#2d6a4f',
+        pointBorderWidth: 2.5,
+        backgroundColor: ctx => {
+          const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+          g.addColorStop(0, 'rgba(45,106,79,0.18)');
+          g.addColorStop(1, 'rgba(45,106,79,0)');
+          return g;
+        }
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0d1f16',
+          titleColor: '#fff',
+          bodyColor: 'rgba(255,255,255,.7)',
+          padding: 10,
+          cornerRadius: 8,
+          displayColors: false,
+          callbacks: { label: ctx => `${ctx.raw} title${ctx.raw !== 1 ? 's' : ''}` }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { family: 'DM Sans', size: 11 }, color: '#7a9e8a' } },
+        y: { grid: { color: '#e0ede6', lineWidth: .8 }, ticks: { font: { family: 'DM Sans', size: 11 }, color: '#7a9e8a' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────
+loadData();
