@@ -52,7 +52,7 @@ async function loadData() {
 // ── UTILS ─────────────────────────────────────────────────────────────────
 const maxYear  = () => rawData.length ? Math.max(...rawData.map(r => r.year)) : new Date().getFullYear();
 const fmtHrs   = m  => (m / 60).toFixed(1).replace(/\.0$/, '') + ' hrs';
-const fmtK     = n  => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toString();
+const fmtK     = n  => n.toLocaleString('en-GB');
 const pe       = p  => PEMOJI[p] || '📺';
 
 function uniqueVals(key) {
@@ -795,8 +795,8 @@ function initLineChart(canvasId, labels, data) {
         }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { font: { family: 'DM Sans', size: 11 }, color: '#7a9e8a' } },
-        y: { grid: { color: '#e0ede6', lineWidth: .8 }, ticks: { font: { family: 'DM Sans', size: 11 }, color: '#7a9e8a' }, beginAtZero: true }
+        x: { grid: { display: false }, ticks: { font: { family: 'DM Sans', size: 13 }, color: '#7a9e8a' } },
+        y: { grid: { color: '#e0ede6', lineWidth: .8 }, ticks: { font: { family: 'DM Sans', size: 13 }, color: '#7a9e8a' }, beginAtZero: true }
       }
     }
   });
