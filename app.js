@@ -1,5 +1,5 @@
 // ── CONFIG ────────────────────────────────────────────────────────────────
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz55DVD1zBnQzDaJ-tHF49wMIzpI6pR_R3k47DPz7yu2fOWM-FdQlKl7MWhVYbaHgU_rQ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx2u09rWIwdLgK6_P1A3n5aeNs_WHqTlmaRSa7wXsMc_nmU856hqKRB7xq_rCb0lyytCw/exec';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const PEMOJI = {
   'Netflix': '🔴',
@@ -93,7 +93,7 @@ function navigateTo(page) {
   destroyCharts();
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.page === page));
   document.getElementById('app').innerHTML = '';
-  const pages = { readme: renderReadme, current: renderCurrentYear, alltime: renderAllTime, data: renderData, suggestions: renderSuggestions };
+  const pages = { readme: renderReadme, current: renderCurrentYear, alltime: renderAllTime, data: renderData, suggestions: renderSuggestions, submit: renderSubmit };
   (pages[page] || renderReadme)();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -800,6 +800,194 @@ function initLineChart(canvasId, labels, data) {
       }
     }
   });
+}
+
+// ── SUBMIT SUGGESTIONS ───────────────────────────────────────────────────
+let suggData = []; // holds Sheet 3 data
+
+async function loadSuggestions() {
+  try {
+    const res  = await fetch(SCRIPT_URL + '?sheet=Suggestions', { redirect: 'follow', mode: 'cors' });
+    const json = await res.json();
+    // If Apps Script isn't updated yet it returns the main watchlist (has 'Name' not 'Title')
+    // Filter to only rows that look like suggestions
+    suggData = Array.isArray(json) ? json.filter(r => r.Title !== undefined) : [];
+  } catch (e) {
+    suggData = [];
+  }
+}
+
+function renderSubmit() {
+  const genres    = [...new Set(rawData.map(r => r.genre).filter(Boolean))].sort();
+  const platforms = [...new Set(rawData.map(r => r.platform).filter(Boolean))].sort();
+
+  const genreOpts = genres.map(g => '<option value="' + g + '">' + g + '</option>').join('');
+  const platOpts  = platforms.map(p => '<option value="' + p + '">' + p + '</option>').join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page-header">
+      <div class="ph-left"><h1>Submit a Suggestion</h1><p>Recommend a show or movie to add to the watchlist</p></div>
+    </div>
+    <div class="submit-page">
+      <div class="submit-left">
+        <div class="submit-form-card">
+          <h2 class="submit-heading">New Suggestion</h2>
+          <p class="submit-sub">Fill in the details below — all submissions are saved directly to the Google Sheet.</p>
+
+          <div class="sf-field">
+            <label class="sf-lbl">Title <span class="sf-req">*</span></label>
+            <input id="sf-title" type="text" class="sf-input" placeholder="e.g. Severance, Dune: Part Two…">
+          </div>
+
+          <div class="sf-row">
+            <div class="sf-field">
+              <label class="sf-lbl">Type <span class="sf-req">*</span></label>
+              <select id="sf-type" class="sf-input">
+                <option value="Show">Show</option>
+                <option value="Movie">Movie</option>
+              </select>
+            </div>
+            <div class="sf-field">
+              <label class="sf-lbl">Genre</label>
+              <select id="sf-genre" class="sf-input">
+                <option value="">— Select —</option>
+                ${genreOpts}
+              </select>
+            </div>
+          </div>
+
+          <div class="sf-field">
+            <label class="sf-lbl">Platform</label>
+            <select id="sf-plat" class="sf-input">
+              <option value="">— Select —</option>
+              ${platOpts}
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div class="sf-field">
+            <label class="sf-lbl">Why watch it?</label>
+            <textarea id="sf-why" class="sf-input sf-ta" placeholder="What makes this worth watching? Keep it short…" maxlength="200" oninput="document.getElementById('sf-chars').textContent=this.value.length"></textarea>
+            <div class="sf-chars"><span id="sf-chars">0</span> / 200</div>
+          </div>
+
+          <div id="sf-msg"></div>
+
+          <button class="sf-submit-btn" onclick="submitSuggestion()">
+            <span>✦</span> Submit Suggestion
+          </button>
+        </div>
+      </div>
+
+      <div class="submit-right">
+        <div id="submit-sidebar-content">
+          <div class="submit-side-card">
+            <div class="submit-side-title">Loading suggestions…</div>
+          </div>
+        </div>
+        <div class="note-card">
+          <div class="note-icon">💡</div>
+          <div class="note-body"><strong>How it works</strong>Submissions go straight into my Google Sheet — they won't automatically appear in the main tracker, they're a wishlist to pick from.</div>
+        </div>
+      </div>
+    </div>`;
+
+  loadSuggestions().then(renderSubmitSidebar);
+}
+
+function renderSubmitSidebar() {
+  const topGenre = (() => {
+    const m = {};
+    suggData.forEach(r => { if (r.Genre) m[r.Genre] = (m[r.Genre] || 0) + 1; });
+    const e = Object.entries(m).sort((a,b) => b[1]-a[1]);
+    return e[0] ? e[0][0] : '—';
+  })();
+  const topPlat = (() => {
+    const m = {};
+    suggData.forEach(r => { if (r.Platform) m[r.Platform] = (m[r.Platform] || 0) + 1; });
+    const e = Object.entries(m).sort((a,b) => b[1]-a[1]);
+    return e[0] ? e[0][0] : '—';
+  })();
+
+  const recent = suggData.slice(-5).reverse();
+  const ICONS  = ['🎬','📺','🍿','🎭','📽️'];
+  const recentRows = recent.length ? recent.map((r, i) => {
+    const meta = [r.Type, r.Genre, r.Platform].filter(Boolean).join(' · ');
+    return '<div class="sr-item">' +
+      '<div class="sr-icon">' + ICONS[i % ICONS.length] + '</div>' +
+      '<div><div class="sr-name">' + (r.Title || '—') + '</div><div class="sr-meta">' + (meta || '—') + '</div></div>' +
+    '</div>';
+  }).join('') : '<div class="sr-empty">😶 Apparently nobody wants me to watch anything. Rude.</div>';
+
+  document.getElementById('submit-sidebar-content').innerHTML =
+    '<div class="submit-side-card">' +
+      '<div class="submit-side-title">Recent Suggestions</div>' +
+      recentRows +
+    '</div>' +
+    '<div class="submit-side-card">' +
+      '<div class="submit-side-title">Stats</div>' +
+      '<div class="sr-stat"><span class="sr-stat-l">Total suggestions</span><span class="sr-stat-r">' + suggData.length + '</span></div>' +
+      '<div class="sr-stat"><span class="sr-stat-l">Top genre</span><span class="sr-stat-r">' + topGenre + '</span></div>' +
+      '<div class="sr-stat"><span class="sr-stat-l">Top platform</span><span class="sr-stat-r">' + topPlat + '</span></div>' +
+    '</div>';
+}
+
+async function submitSuggestion() {
+  const title = document.getElementById('sf-title').value.trim();
+  const type  = document.getElementById('sf-type').value;
+  const genre = document.getElementById('sf-genre').value;
+  const plat  = document.getElementById('sf-plat').value;
+  const why   = document.getElementById('sf-why').value.trim();
+  const msg   = document.getElementById('sf-msg');
+
+  if (!title) {
+    msg.innerHTML = '<div class="sf-error">Please enter a title.</div>';
+    document.getElementById('sf-title').focus();
+    return;
+  }
+
+  const btn = document.querySelector('.sf-submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span>⏳</span> Submitting…';
+  msg.innerHTML = '';
+
+  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const params = new URLSearchParams({
+    action:   'suggest',
+    Title:    title,
+    Type:     type,
+    Genre:    genre,
+    Platform: plat,
+    Note:     why,
+    Date:     today
+  });
+
+  try {
+    const res  = await fetch(SCRIPT_URL + '?' + params.toString(), { redirect: 'follow', mode: 'cors' });
+    const json = await res.json();
+
+    // If Apps Script isn't updated, it returns the main watchlist not {status:'ok'}
+    if (!json || json.status !== 'ok') {
+      msg.innerHTML = '<div class="sf-error">⚠️ The Apps Script needs to be updated to support submissions. Check the setup instructions.</div>';
+      btn.disabled = false;
+      btn.innerHTML = '<span>✦</span> Submit Suggestion';
+      return;
+    }
+
+    msg.innerHTML = '<div class="sf-success">✓ Suggestion submitted! It\'s now in the Google Sheet.</div>';
+    // Clear form
+    ['sf-title','sf-why'].forEach(id => document.getElementById(id).value = '');
+    ['sf-genre','sf-plat'].forEach(id => document.getElementById(id).selectedIndex = 0);
+    document.getElementById('sf-chars').textContent = '0';
+    // Reload sidebar
+    await loadSuggestions();
+    renderSubmitSidebar();
+  } catch (e) {
+    msg.innerHTML = '<div class="sf-error">Something went wrong. Please try again.</div>';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<span>✦</span> Submit Suggestion';
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
