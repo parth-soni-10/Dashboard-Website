@@ -41,8 +41,8 @@ async function notifyIndexNow(urls) {
   };
 
   try {
-    // Submit to IndexNow API (supported by Bing, Yandex, Seznam.cz, Naver)
-    const response = await fetch('https://api.indexnow.org/indexnow', {
+    // Use Netlify Function as a proxy (CORS bypass)
+    const response = await fetch('/.netlify/functions/indexnow', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8'
@@ -138,8 +138,9 @@ async function notifyContentUpdate() {
 // 1. Update INDEXNOW_CONFIG.host with your actual domain
 // 2. Update INDEXNOW_CONFIG.keyLocation with your actual domain
 // 3. Upload the key file (ce3dcd8fd8fde3bc072a783db570897e.txt) to your website root
-// 4. Include this script in your HTML or merge it with app.js
-// 5. Call notifyContentUpdate() when content changes (optional, but recommended)
+// 4. Ensure the Netlify function exists at netlify/functions/indexnow.js
+// 5. Include this script in your HTML or merge it with app.js
+// 6. Call notifyContentUpdate() when content changes (optional, but recommended)
 // ────────────────────────────────────────────────────────────────────────────
 
 // Export for use in modules
