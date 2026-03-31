@@ -1,5 +1,5 @@
 // Netlify Function: Proxy for IndexNow API (bypasses CORS)
-exports.handler = async (event) {
+exports.handler = async (event) => {   // ← ADDED "=>" after (event)
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
