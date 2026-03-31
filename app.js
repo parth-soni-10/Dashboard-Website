@@ -39,6 +39,9 @@ async function loadData() {
       month:      r.Month      || r.month      || '',
       year:       parseInt(r.Year || r.year || 0) || 0
     })).filter(r => r.name && r.year > 0);
+
+    // Notify search engines of content update
+    notifyContentUpdate().catch(err => console.log('IndexNow notification skipped:', err));
   } catch (e) {
     console.warn('Data load failed:', e);
     rawData = [];
@@ -593,13 +596,13 @@ function updateDataTable() {
       <td>${r.genre || '—'}</td>
       <td>${pe(r.platform)} ${r.platform}</td>
       <td style="color:var(--text-soft)">${fmtDate(r.watchDate)}</td>
-    </tr>`;
+     \)`;
   }).join('');
 
   el('dat-table').innerHTML = `<table>
     <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Watch Date</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table>`;
+   </table>`;
 
   const prevDisabled = dataPageNum <= 1 ? 'disabled' : '';
   const nextDisabled = dataPageNum >= totalPages ? 'disabled' : '';
@@ -975,6 +978,13 @@ async function submitSuggestion() {
     }
 
     msg.innerHTML = '<div class="sf-success">✓ Suggestion submitted! It\'s now in the Google Sheet.</div>';
+
+    // Notify search engines about updated pages
+    notifyIndexNow([
+      `https://${INDEXNOW_CONFIG.host}/#suggestions`,
+      `https://${INDEXNOW_CONFIG.host}/#submit`
+    ]).catch(err => console.log('IndexNow notification skipped:', err));
+
     // Clear form
     ['sf-title','sf-why'].forEach(id => document.getElementById(id).value = '');
     ['sf-genre','sf-plat'].forEach(id => document.getElementById(id).selectedIndex = 0);
