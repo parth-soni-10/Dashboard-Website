@@ -5,7 +5,7 @@
 const INDEXNOW_CONFIG = {
   key: 'ce3dcd8fd8fde3bc072a783db570897e',
   keyLocation: 'https://contenttrackerdashboard.netlify.app/ce3dcd8fd8fde3bc072a783db570897e.txt',
-  host: 'https://contenttrackerdashboard.netlify.app'
+  host: 'contenttrackerdashboard.netlify.app'   // bare domain (no protocol)
 };
 
 /**
@@ -34,7 +34,7 @@ async function notifyIndexNow(urls) {
 
   // Prepare the IndexNow payload
   const payload = {
-    host: INDEXNOW_CONFIG.host,
+    host: INDEXNOW_CONFIG.host,   // bare domain
     key: INDEXNOW_CONFIG.key,
     keyLocation: INDEXNOW_CONFIG.keyLocation,
     urlList: validUrls
@@ -80,19 +80,9 @@ async function notifyIndexNow(urls) {
  * Call this after data is loaded or updated
  */
 async function notifyContentUpdate() {
+  // Only submit the main page (without fragments)
   const baseUrl = `https://${INDEXNOW_CONFIG.host}`;
-  
-  // List all pages that should be reindexed
-  const pages = [
-    baseUrl + '/',
-    baseUrl + '/#current',
-    baseUrl + '/#alltime',
-    baseUrl + '/#data',
-    baseUrl + '/#suggestions',
-    baseUrl + '/#submit'
-  ];
-  
-  return await notifyIndexNow(pages);
+  return await notifyIndexNow([baseUrl + '/']);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -122,8 +112,7 @@ async function notifyContentUpdate() {
 //   if (json && json.status === 'ok') {
 //     // Notify search engines about the suggestions page update
 //     notifyIndexNow([
-//       'https://yourwebsite.com/#suggestions',
-//       'https://yourwebsite.com/#submit'
+//       'https://yourwebsite.com/'
 //     ]);
 //   }
 // }
@@ -135,7 +124,7 @@ async function notifyContentUpdate() {
 // ────────────────────────────────────────────────────────────────────────────
 // INTEGRATION INSTRUCTIONS
 // ────────────────────────────────────────────────────────────────────────────
-// 1. Update INDEXNOW_CONFIG.host with your actual domain
+// 1. Update INDEXNOW_CONFIG.host with your actual domain (bare, e.g. example.com)
 // 2. Update INDEXNOW_CONFIG.keyLocation with your actual domain
 // 3. Upload the key file (ce3dcd8fd8fde3bc072a783db570897e.txt) to your website root
 // 4. Ensure the Netlify function exists at netlify/functions/indexnow.js
