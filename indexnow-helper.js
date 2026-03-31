@@ -5,7 +5,7 @@
 const INDEXNOW_CONFIG = {
   key: 'ce3dcd8fd8fde3bc072a783db570897e',
   keyLocation: 'https://contenttrackerdashboard.netlify.app/ce3dcd8fd8fde3bc072a783db570897e.txt',
-  host: 'contenttrackerdashboard.netlify.app'   // bare domain (no protocol)
+  host: 'contenttrackerdashboard.netlify.app'
 };
 
 /**
