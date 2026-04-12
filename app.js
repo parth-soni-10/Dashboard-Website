@@ -39,9 +39,6 @@ async function loadData() {
       month:      r.Month      || r.month      || '',
       year:       parseInt(r.Year || r.year || 0) || 0
     })).filter(r => r.name && r.year > 0);
-
-    // Notify search engines of content update
-    notifyContentUpdate().catch(err => console.log('IndexNow notification skipped:', err));
   } catch (e) {
     console.warn('Data load failed:', e);
     rawData = [];
@@ -559,8 +556,8 @@ function updateDataTable() {
     return new Date(b.watchDate) - new Date(a.watchDate);
   });
 
-  const shows  = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).length;
-  const movies = d.filter(r => r.type.toLowerCase() === 'movie').length;
+  const shows  = d.filter(r => r.type && (r.type.includes('Show') || r.type.includes('Series'))).length;
+  const movies = d.filter(r => r.type && r.type.toLowerCase() === 'movie').length;
 
   const el = id => document.getElementById(id);
   if (el('dh-shows'))  el('dh-shows').textContent  = shows;
@@ -573,7 +570,8 @@ function updateDataTable() {
   const end   = start + PER_PAGE;
   const page  = d.slice(start, end);
 
-  el('dat-count').innerHTML = `<strong>${d.length}</strong> title${d.length !== 1 ? 's' : ''} found`;
+  const countEl = el('dat-count');
+  if (countEl) countEl.innerHTML = '<strong>' + d.length + '</strong> title' + (d.length !== 1 ? 's' : '') + ' found';
 
   if (!d.length) {
     el('dat-table').innerHTML = '<div class="empty-state"><span>🔍</span>No titles match your filters</div>';
@@ -581,38 +579,51 @@ function updateDataTable() {
     return;
   }
 
-  const fmtDate = s => {
-    try { const dt = new Date(s); return isNaN(dt) ? s : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
-    catch { return s; }
+  const fmtDate = function(s) {
+    if (!s) return '—';
+    try {
+      var dt = new Date(s);
+      return isNaN(dt.getTime()) ? s : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch(e) { return s; }
   };
 
-  // Build rows using string concat to avoid nested quotes in template literal class attributes
-  const rows = page.map((r, i) => {
-    const pillClass = r.type.toLowerCase() === 'movie' ? 'type-pill movie' : 'type-pill show';
-    return `<tr>
-      <td class="row-num">${start + i + 1}</td>
-      <td style="font-weight:500">${r.name}</td>
-      <td><span class="${pillClass}">${r.type}</span></td>
-      <td>${r.genre || '—'}</td>
-      <td>${pe(r.platform)} ${r.platform}</td>
-      <td style="color:var(--text-soft)">${fmtDate(r.watchDate)}</td>
-     \)`;
-  }).join('');
+  // Build each row with pure string concatenation — no template literals
+  var rowsHTML = '';
+  for (var i = 0; i < page.length; i++) {
+    var r = page[i];
+    var pillClass = (r.type && r.type.toLowerCase() === 'movie') ? 'type-pill movie' : 'type-pill show';
+    var typeLabel = r.type || '—';
+    var genre     = r.genre || '—';
+    var platEmoji = pe(r.platform || '');
+    var platName  = r.platform || '—';
+    var name      = r.name || '—';
+    // Escape any HTML special chars in user data
+    name = name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    rowsHTML += '<tr>';
+    rowsHTML += '<td class="row-num">' + (start + i + 1) + '</td>';
+    rowsHTML += '<td style="font-weight:500">' + name + '</td>';
+    rowsHTML += '<td><span class="' + pillClass + '">' + typeLabel + '</span></td>';
+    rowsHTML += '<td>' + genre + '</td>';
+    rowsHTML += '<td>' + platEmoji + ' ' + platName + '</td>';
+    rowsHTML += '<td style="color:var(--text-soft)">' + fmtDate(r.watchDate) + '</td>';
+    rowsHTML += '</tr>';
+  }
 
-  el('dat-table').innerHTML = `<table>
-    <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Watch Date</th></tr></thead>
-    <tbody>${rows}</tbody>
-   </table>`;
+  el('dat-table').innerHTML =
+    '<table>' +
+      '<thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Watch Date</th></tr></thead>' +
+      '<tbody>' + rowsHTML + '</tbody>' +
+    '</table>';
 
-  const prevDisabled = dataPageNum <= 1 ? 'disabled' : '';
-  const nextDisabled = dataPageNum >= totalPages ? 'disabled' : '';
+  var prevDisabled = dataPageNum <= 1 ? 'disabled' : '';
+  var nextDisabled = dataPageNum >= totalPages ? 'disabled' : '';
 
-  el('dat-pag').innerHTML = `
-    <div class="pag-info">Showing ${start + 1}–${Math.min(end, d.length)} of ${d.length}</div>
-    <div class="pag-btns">
-      <button class="pag-btn" onclick="dataPageNum--;updateDataTable()" ${prevDisabled}>← Prev</button>
-      <button class="pag-btn" onclick="dataPageNum++;updateDataTable()" ${nextDisabled}>Next →</button>
-    </div>`;
+  el('dat-pag').innerHTML =
+    '<div class="pag-info">Showing ' + (start + 1) + '–' + Math.min(end, d.length) + ' of ' + d.length + '</div>' +
+    '<div class="pag-btns">' +
+      '<button class="pag-btn" onclick="dataPageNum--;updateDataTable()" ' + prevDisabled + '>← Prev</button>' +
+      '<button class="pag-btn" onclick="dataPageNum++;updateDataTable()" ' + nextDisabled + '>Next →</button>' +
+    '</div>';
 }
 
 // ── SUGGESTIONS ───────────────────────────────────────────────────────────
@@ -978,13 +989,6 @@ async function submitSuggestion() {
     }
 
     msg.innerHTML = '<div class="sf-success">✓ Suggestion submitted! It\'s now in the Google Sheet.</div>';
-
-    // Notify search engines about updated pages
-    notifyIndexNow([
-      `https://${INDEXNOW_CONFIG.host}/#suggestions`,
-      `https://${INDEXNOW_CONFIG.host}/#submit`
-    ]).catch(err => console.log('IndexNow notification skipped:', err));
-
     // Clear form
     ['sf-title','sf-why'].forEach(id => document.getElementById(id).value = '');
     ['sf-genre','sf-plat'].forEach(id => document.getElementById(id).selectedIndex = 0);

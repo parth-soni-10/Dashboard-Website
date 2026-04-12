@@ -1,5 +1,5 @@
 // Netlify Function: Proxy for IndexNow API (bypasses CORS)
-exports.handler = async (event) => {   // ← ADDED "=>" after (event)
+exports.handler = async (event) => {
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
@@ -11,7 +11,6 @@ exports.handler = async (event) => {   // ← ADDED "=>" after (event)
   try {
     // Parse the incoming request body
     const payload = JSON.parse(event.body);
-    console.log('Received payload:', JSON.stringify(payload, null, 2));
 
     // Forward the request to the IndexNow API
     const response = await fetch('https://api.indexnow.org/indexnow', {
@@ -22,16 +21,13 @@ exports.handler = async (event) => {   // ← ADDED "=>" after (event)
       body: JSON.stringify(payload)
     });
 
-    // Read the response body (it may contain error details)
-    const responseBody = await response.text();
-    console.log('IndexNow response status:', response.status);
-    console.log('IndexNow response body:', responseBody);
-
     // Return the status and response from IndexNow
+    const responseBody = await response.text();
+
     return {
       statusCode: response.status,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': '*',   // Allow your frontend to access
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
