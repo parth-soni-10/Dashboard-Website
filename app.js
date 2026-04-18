@@ -31,9 +31,11 @@ async function loadData() {
     const json = await res.json();
     rawData = json.map(r => ({
       name:       r.Name       || r.name       || '',
+      season:     r.Season     || r.season     || '',
       type:       r.Type       || r.type       || '',
       genre:      r['Details/Genre'] || r.Genre || r.genre || '',
       platform:   r.Platform   || r.platform   || '',
+      episodes:   parseInt(r['Episode Count'] || r.episodes || 0) || 0,
       screentime: parseFloat(r.Screentime || r.screentime || 0) || 0,
       watchDate:  r['Watch Date'] || r.watchDate || '',
       month:      r.Month      || r.month      || '',
@@ -133,17 +135,22 @@ function renderReadme() {
     .slice(0, 6);
   const RW_ICONS = ['🎬','📽️','🎭','🍿','📺','🎞️','🎥','🎦','🌟','✨','🎪','🎨'];
   const recentHTML = recent.map((r, i) => {
-    const typeClass = r.type.toLowerCase() === 'movie' ? 'rw-pill movie' : 'rw-pill show';
-    const typeLabel = r.type.toLowerCase() === 'movie' ? 'Movie' : 'Show';
-    const icon      = RW_ICONS[i % RW_ICONS.length];
-    const genre     = r.genre ? '<span class="rw-genre">' + r.genre + '</span>' : '';
+    const typeClass  = r.type.toLowerCase() === 'movie' ? 'rw-pill movie' : 'rw-pill show';
+    const typeLabel  = r.type.toLowerCase() === 'movie' ? 'Movie' : 'Show';
+    const icon       = RW_ICONS[i % RW_ICONS.length];
+    const genre      = r.genre ? '<span class="rw-genre">' + r.genre + '</span>' : '';
+    const seasonStr  = r.type && r.type.toLowerCase() !== 'movie'
+      ? ' S' + (r.season || '1')
+      : '';
+    const epsBadge   = r.episodes ? '<span class="rw-genre">' + r.episodes + ' eps</span>' : '';
     return '<div class="rw-card">' +
       '<div class="rw-emoji">' + icon + '</div>' +
       '<div class="rw-info">' +
-        '<div class="rw-name">' + r.name + '</div>' +
+        '<div class="rw-name">' + r.name + seasonStr + '</div>' +
         '<div class="rw-meta">' +
           '<span class="' + typeClass + '">' + typeLabel + '</span>' +
           genre +
+          epsBadge +
           '<span class="rw-date">' + fmtShortDate(r.watchDate) + '</span>' +
         '</div>' +
       '</div>' +
@@ -591,27 +598,31 @@ function updateDataTable() {
   var rowsHTML = '';
   for (var i = 0; i < page.length; i++) {
     var r = page[i];
-    var pillClass = (r.type && r.type.toLowerCase() === 'movie') ? 'type-pill movie' : 'type-pill show';
-    var typeLabel = r.type || '—';
-    var genre     = r.genre || '—';
-    var platEmoji = pe(r.platform || '');
-    var platName  = r.platform || '—';
-    var name      = r.name || '—';
-    // Escape any HTML special chars in user data
+    var pillClass  = (r.type && r.type.toLowerCase() === 'movie') ? 'type-pill movie' : 'type-pill show';
+    var typeLabel  = r.type || '—';
+    var genre      = r.genre || '—';
+    var platEmoji  = pe(r.platform || '');
+    var platName   = r.platform || '—';
+    var name       = r.name || '—';
+    var isMovie   = r.type && r.type.toLowerCase() === 'movie';
+    var seasonStr = isMovie ? '' : ' S' + (r.season || '1');
+    var epsStr     = r.episodes ? r.episodes + ' eps' : '—';
     name = name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     rowsHTML += '<tr>';
     rowsHTML += '<td class="row-num">' + (start + i + 1) + '</td>';
-    rowsHTML += '<td style="font-weight:500">' + name + '</td>';
+    rowsHTML += '<td style="font-weight:500">' + name + '<span style="color:var(--text-soft);font-weight:400">' + seasonStr + '</span></td>';
     rowsHTML += '<td><span class="' + pillClass + '">' + typeLabel + '</span></td>';
     rowsHTML += '<td>' + genre + '</td>';
     rowsHTML += '<td>' + platEmoji + ' ' + platName + '</td>';
+    rowsHTML += '<td style="color:var(--text-mid)">' + epsStr + '</td>';
+    rowsHTML += '<td style="color:var(--text-mid)">' + (r.screentime ? r.screentime + ' mins' : '—') + '</td>';
     rowsHTML += '<td style="color:var(--text-soft)">' + fmtDate(r.watchDate) + '</td>';
     rowsHTML += '</tr>';
   }
 
   el('dat-table').innerHTML =
     '<table>' +
-      '<thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Watch Date</th></tr></thead>' +
+      '<thead><tr><th>#</th><th>Name</th><th>Type</th><th>Genre</th><th>Platform</th><th>Episodes</th><th>Screentime</th><th>Watch Date</th></tr></thead>' +
       '<tbody>' + rowsHTML + '</tbody>' +
     '</table>';
 
