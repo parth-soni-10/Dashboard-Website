@@ -309,8 +309,9 @@ function updateCurrentYear() {
   const bestMo     = Object.entries(countByMonth(d)).sort((a, b) => b[1] - a[1])[0] || ['—', 0];
 
   // ── Pre-compute ALL dynamic classes before template literals ──────────
-  const showsPct  = d.length ? (shows / d.length * 100).toFixed(0) : 0;
-  const moviesPct = d.length ? (movies / d.length * 100).toFixed(0) : 0;
+  const showsPct   = d.length ? (shows / d.length * 100).toFixed(0) : 0;
+  const moviesPct  = d.length ? (movies / d.length * 100).toFixed(0) : 0;
+  const totalEpscy = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).reduce((s, r) => s + r.episodes, 0);
   const diffCardClass = diff < 0 ? 'kpi-card accent-red a4' : 'kpi-card accent-gold a4';
   const diffValClass  = diff < 0 ? 'kpi-val negative' : 'kpi-val';
   const diffBadgeClass = diff < 0 ? 'badge badge-red' : 'badge badge-green';
@@ -328,7 +329,7 @@ function updateCurrentYear() {
       <div class="kpi-card a1">
         <div class="kpi-label">Shows This Year</div>
         <div class="kpi-val">${shows}</div>
-        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total</div>
+        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total · ${totalEpscy} eps</div>
       </div>
       <div class="kpi-card a2">
         <div class="kpi-label">Movies This Year</div>
@@ -441,6 +442,7 @@ function updateAllTime() {
   // ── Pre-compute ALL dynamic values before template literals ───────────
   const showsPct  = d.length ? (shows / d.length * 100).toFixed(1) : 0;
   const moviesPct = d.length ? (movies / d.length * 100).toFixed(1) : 0;
+  const totalEpsat = d.filter(r => r.type.includes('Show') || r.type.includes('Series')).reduce((s, r) => s + r.episodes, 0);
   const genrePct  = totalGen ? (topGenre[1] / totalGen * 100).toFixed(1) : 0;
   const yearLabel = yearsSet.length + ' year' + (yearsSet.length !== 1 ? 's' : '') + ' of data';
 
@@ -461,7 +463,7 @@ function updateAllTime() {
       <div class="kpi-card a3">
         <div class="kpi-label">Shows (All Time)</div>
         <div class="kpi-val">${shows}</div>
-        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total</div>
+        <div class="kpi-sub"><span class="badge badge-green">${showsPct}%</span> of total · ${totalEpsat} eps</div>
       </div>
       <div class="kpi-card a4">
         <div class="kpi-label">Movies (All Time)</div>
